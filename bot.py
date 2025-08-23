@@ -10,21 +10,44 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 print("DEBUG TOKEN:", TOKEN)
 
-# ----------- Avalon Roles -----------
-ROLES = {
-    "good": ["梅林", "派西維爾"],
-    "evil": ["莫甘娜", "刺客", "奧伯倫"],
-    "others": ["忠臣"]
-}
+# ----------- 遊戲設定 -----------
+games = {}          # 儲存遊戲角色分配
+votes = {}          # 一般投票
+mission_votes = {}  # 任務投票
+setup_roles = {}    # 自訂角色池 per guild
 
-# 儲存遊戲狀態
-games = {}
+# ===== 角色補全邏輯 =====
+def auto_fill_roles(selected_roles, num_players):
+    roles = selected_roles.copy()
+    # 計算壞人與好人數
+    num_good = 0
+    num_evil = 0
+    for r in roles:
+        if r in ["梅林", "派西維爾", "忠臣"]:
+            num_good += 1
+        else:
+            num_evil += 1
+    # 補忠臣
+    while num_good + num_evil < num_players:
+        roles.append("忠臣")  # 好人補忠臣
+        num_good += 1
+    return roles
 
 @bot.event
 async def on_ready():
     print(f"✅ 已登入 {bot.user}")
 
-# ===== 角色發牌 =====
+# ===== 設定角色池 =====
+@bot.command()
+async def setup(ctx, *roles):
+    """設定這局的角色池（自訂角色名稱）"""
+    if len(roles) == 0:
+        await ctx.send("⚠️ 請輸入角色名稱，例如：梅林 派西維爾 莫甘娜 刺客 奧伯倫")
+        return
+    setup_roles[ctx.guild.id] = list(roles)
+    await ctx.send(f"✅ 角色池已設定：{', '.join(roles)}")
+
+# ===== 發牌 =====
 @bot.command()
 async def deal(ctx, *players: discord.Member):
     """發牌，將角色私訊給玩家"""
@@ -33,7 +56,9 @@ async def deal(ctx, *players: discord.Member):
         await ctx.send("玩家不足（至少 5 人）")
         return
 
-    roles_pool = ["梅林", "派西維爾", "莫甘娜", "刺客"] + ["忠臣"] * (len(player_list)-4)
+    # 使用自訂角色池，如果沒設定就用預設
+    roles_pool = setup_roles.get(ctx.guild.id, ["梅林", "派西維爾", "莫甘娜", "刺客", "奧伯倫"])
+    roles_pool = auto_fill_roles(roles_pool, len(player_list))
     random.shuffle(roles_pool)
 
     assignment = {}
@@ -57,57 +82,54 @@ async def vision(ctx):
         return
     assignment = games[ctx.guild.id]
 
-    # 找出角色
-    evil_team = [pid for pid, r in assignment.items() if r in ["莫甘娜", "刺客"]]
+    # 找角色
     merlin = [pid for pid, r in assignment.items() if r == "梅林"]
     percival = [pid for pid, r in assignment.items() if r == "派西維爾"]
+    evil_team = [pid for pid, r in assignment.items() if r in ["刺客", "莫甘娜", "爪牙", "莫德雷德"]]
+    oberon = [pid for pid, r in assignment.items() if r == "奧伯倫"]
+    modred = [pid for pid, r in assignment.items() if r == "莫德雷德"]
 
-    # 梅林看到壞人（不包含奧伯倫）
+    # 梅林看到壞人（包含奧伯倫，但不包含莫德雷德）
     for pid in merlin:
         user = ctx.guild.get_member(pid)
-        names = [ctx.guild.get_member(e).display_name for e in evil_team]
+        names = [ctx.guild.get_member(e).display_name for e in evil_team if e not in modred] + \
+                [ctx.guild.get_member(o).display_name for o in oberon]
         await user.send(f"👀 你知道壞人有：{', '.join(names)}")
 
-    # 壞人互相知道（奧伯倫例外）
-    for pid in evil_team:
-        user = ctx.guild.get_member(pid)
-        names = [ctx.guild.get_member(e).display_name for e in evil_team if e != pid]
-        await user.send(f"😈 你知道的同伴有：{', '.join(names) if names else '沒人'}")
-
-    # 派西維爾看到梅林/莫甘娜
+    # 派西維爾看到梅林/莫甘娜（身份不明）
     for pid in percival:
         user = ctx.guild.get_member(pid)
-        names = [ctx.guild.get_member(uid).display_name for uid, r in assignment.items() if r in ["梅林", "莫甘娜"]]
+        names = [ctx.guild.get_member(uid).display_name for uid, r in assignment.items() if r in ["梅林","莫甘娜"]]
         await user.send(f"🔮 你知道梅林/莫甘娜有：{', '.join(names)}")
 
+    # 壞人看到其他壞人（除了奧伯倫），身份不明
+    for pid in evil_team + modred:
+        user = ctx.guild.get_member(pid)
+        names = [ctx.guild.get_member(uid).display_name for uid in evil_team + modred if uid != pid]
+        await user.send(f"😈 你知道的壞人有：{', '.join(names) if names else '沒人'}")
+
+    # 奧伯倫不被壞人看到，但梅林可以看到（已處理於梅林視野）
     await ctx.send("✨ 特殊視野已經分發完畢！")
 
-# ===== 匿名投票 =====
-votes = {}
-
+# ===== 普通投票 =====
 @bot.command()
 async def votestart(ctx):
-    """開始匿名投票"""
     votes[ctx.guild.id] = {}
     await ctx.send("🗳️ 匿名投票開始！請使用 `!vote 同意` 或 `!vote 否決`")
 
 @bot.command()
 async def vote(ctx, choice: str):
-    """玩家投票"""
     if ctx.guild.id not in votes:
         await ctx.send("⚠️ 尚未開始投票")
         return
-
     if choice not in ["同意", "否決"]:
         await ctx.send("只能輸入 `同意` 或 `否決`")
         return
-
     votes[ctx.guild.id][ctx.author.id] = choice
     await ctx.send(f"{ctx.author.mention} ✅ 已投票（不公開內容）")
 
 @bot.command()
 async def voteresult(ctx):
-    """公布投票結果"""
     if ctx.guild.id not in votes:
         await ctx.send("⚠️ 尚未開始投票")
         return
@@ -116,6 +138,52 @@ async def voteresult(ctx):
     reject = sum(1 for v in result.values() if v == "否決")
     await ctx.send(f"📊 投票結果：同意 {agree} 票，否決 {reject} 票")
 
+# ===== 任務投票 =====
+@bot.command()
+async def missionstart(ctx, *players: discord.Member):
+    """開始任務投票，將任務玩家私訊投票選項"""
+    if len(players) == 0:
+        await ctx.send("⚠️ 請指定參與任務的玩家")
+        return
+
+    guild_id = ctx.guild.id
+    mission_votes[guild_id] = {}
+
+    for p in players:
+        try:
+            await p.send(
+                "🗳️ 任務投票開始！請私訊我 `!missionvote 成功` 或 `!missionvote 失敗`"
+            )
+        except:
+            await ctx.send(f"無法私訊 {p.mention}")
+
+    await ctx.send(f"✅ 任務投票已開始，已私訊 {len(players)} 位玩家")
+
+@bot.command()
+async def missionvote(ctx, choice: str):
+    """玩家私訊投票任務成功/失敗"""
+    guild_id = ctx.guild.id
+    if guild_id not in mission_votes:
+        await ctx.send("⚠️ 尚未開始任務投票")
+        return
+    if choice not in ["成功", "失敗"]:
+        await ctx.send("⚠️ 只能輸入 `成功` 或 `失敗`")
+        return
+    mission_votes[guild_id][ctx.author.id] = choice
+    await ctx.send("✅ 你的任務投票已紀錄")
+
+@bot.command()
+async def missionresult(ctx):
+    """統計並公布任務投票結果"""
+    guild_id = ctx.guild.id
+    if guild_id not in mission_votes:
+        await ctx.send("⚠️ 尚未開始任務投票")
+        return
+    result = mission_votes.pop(guild_id)
+    success_count = sum(1 for v in result.values() if v == "成功")
+    fail_count = sum(1 for v in result.values() if v == "失敗")
+    await ctx.send(f"📊 任務投票結果：成功 {success_count} 票，失敗 {fail_count} 票")
+
+# ===== 啟動 Bot =====
 if __name__ == "__main__":
     bot.run(TOKEN)
-
