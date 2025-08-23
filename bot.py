@@ -47,7 +47,7 @@ async def deal(ctx, *players: discord.Member):
 
     # 選用自訂角色池，如果沒有就用預設
     roles_pool = custom_role_pool.get(ctx.guild.id, DEFAULT_ROLES["good"] + DEFAULT_ROLES["evil"])
-    
+
     # 計算需要補充的角色數
     needed = len(player_list) - len(roles_pool)
     if needed > 0:
@@ -90,26 +90,32 @@ async def vision(ctx):
     merlin = [pid for pid, r in assignment.items() if r == "梅林"]
     percival = [pid for pid, r in assignment.items() if r == "派西維爾"]
 
-    # 梅林看到壞人（不含莫德雷德，但包含奧伯倫）
+    # 梅林看到壞人（包含奧伯倫，但不含莫德雷德）
     for pid in merlin:
         user = ctx.guild.get_member(pid)
         if user:
-            names = [ctx.guild.get_member(e).display_name for e in evil_team] + \
-                    [ctx.guild.get_member(o).display_name for o in oberon if ctx.guild.get_member(o)]
+            names = [ctx.guild.get_member(e).display_name for e in evil_team if ctx.guild.get_member(e)]
+            names += [ctx.guild.get_member(o).display_name for o in oberon if ctx.guild.get_member(o)]
             await user.send(f"👀 你知道壞人有：{', '.join(names)}")
 
     # 壞人互相知道（奧伯倫除外，包括莫德雷德）
     for pid in evil_team + modred:
         user = ctx.guild.get_member(pid)
         if user:
-            names = [ctx.guild.get_member(e).display_name for e in evil_team + modred if e != pid]
+            names = [ctx.guild.get_member(e).display_name for e in evil_team + modred if e != pid and ctx.guild.get_member(e)]
             await user.send(f"😈 你知道的同伴有：{', '.join(names) if names else '沒人'}")
+
+    # 奧伯倫看不到任何壞人，也不被任何壞人看到
+    for pid in oberon:
+        user = ctx.guild.get_member(pid)
+        if user:
+            await user.send("😈 你是隱蔽壞人，看不到任何隊友")
 
     # 派西維爾看到梅林/莫甘娜
     for pid in percival:
         user = ctx.guild.get_member(pid)
         if user:
-            names = [ctx.guild.get_member(uid).display_name for uid, r in assignment.items() if r in ["梅林", "莫甘娜"]]
+            names = [ctx.guild.get_member(uid).display_name for uid, r in assignment.items() if r in ["梅林", "莫甘娜"] and ctx.guild.get_member(uid)]
             await user.send(f"🔮 你知道梅林/莫甘娜有：{', '.join(names)}")
 
     await ctx.send("✨ 特殊視野已經分發完畢！")
@@ -151,14 +157,12 @@ async def vote(ctx, choice: str):
         return
 
     # 找到玩家所屬伺服器的遊戲
-    # 這裡假設玩家只有在一個遊戲中
     for guild_id, votes in mission_votes.items():
         if ctx.author.id in votes:
             votes[ctx.author.id] = choice
             await ctx.send(f"✅ 你的投票已紀錄：{choice}")
             return
         elif ctx.author.id not in votes:
-            # 玩家第一次投票，加入紀錄
             votes[ctx.author.id] = choice
             await ctx.send(f"✅ 你的投票已紀錄：{choice}")
             return
