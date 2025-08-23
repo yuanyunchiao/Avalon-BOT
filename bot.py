@@ -114,42 +114,75 @@ async def vision(ctx):
 
     await ctx.send("✨ 特殊視野已經分發完畢！")
 
-# ===== 任務投票 =====
-@bot.command()
-async def missionstart(ctx, *players: discord.Member):
-    """開始任務投票"""
-    if not players:
-        await ctx.send("⚠️ 請指定上任務的玩家")
-        return
-    mission_votes[ctx.guild.id] = {p.id: None for p in players}
-    await ctx.send("🗳️ 任務投票開始！玩家請私訊 `!missionvote 成功` 或 `!missionvote 失敗`")
+# ===== 任務投票（DM） =====
+mission_votes = {}  # { guild_id: { player_id: '成功'/'失敗' } }
 
 @bot.command()
-async def missionvote(ctx, choice: str):
-    """玩家私訊投票"""
-    if ctx.guild.id not in mission_votes:
-        await ctx.send("⚠️ 尚未開始任務投票")
+async def missionstart(ctx, *players: discord.Member):
+    """伺服器發起任務投票，Bot 私訊每位玩家"""
+    if len(players) == 0:
+        await ctx.send("⚠️ 請指定參與任務的玩家")
         return
-    if ctx.author.id not in mission_votes[ctx.guild.id]:
-        await ctx.send("⚠️ 你不在本次任務隊伍中")
+
+    guild_id = ctx.guild.id
+    mission_votes[guild_id] = {}
+
+    for p in players:
+        try:
+            await p.send(
+                f"🗳️ {ctx.guild.name} 任務開始！請回覆 `!vote 成功` 或 `!vote 失敗`"
+            )
+        except:
+            await ctx.send(f"無法私訊 {p.mention}")
+
+    await ctx.send("✅ 任務投票已經私訊給玩家！")
+
+@bot.command()
+async def vote(ctx, choice: str):
+    """玩家在 DM 投票"""
+    # 確保是在 DM 發送
+    if ctx.guild is not None:
+        await ctx.send("⚠️ 請私訊我投票，不要在伺服器頻道使用此指令")
         return
+
+    # 檢查輸入
     if choice not in ["成功", "失敗"]:
         await ctx.send("只能輸入 `成功` 或 `失敗`")
         return
 
-    mission_votes[ctx.guild.id][ctx.author.id] = choice
-    await ctx.send(f"✅ 你已投票：{choice}")
+    # 找到玩家所屬伺服器的遊戲
+    # 這裡假設玩家只有在一個遊戲中
+    for guild_id, votes in mission_votes.items():
+        if ctx.author.id in votes:
+            votes[ctx.author.id] = choice
+            await ctx.send(f"✅ 你的投票已紀錄：{choice}")
+            return
+        elif ctx.author.id not in votes:
+            # 玩家第一次投票，加入紀錄
+            votes[ctx.author.id] = choice
+            await ctx.send(f"✅ 你的投票已紀錄：{choice}")
+            return
+
+    await ctx.send("⚠️ 目前沒有任務要求你投票，請等待主持人開始任務")
 
 @bot.command()
 async def missionresult(ctx):
-    """公布任務投票結果"""
-    if ctx.guild.id not in mission_votes:
-        await ctx.send("⚠️ 尚未開始任務投票")
+    """統計任務投票結果"""
+    if ctx.guild is None:
+        await ctx.send("⚠️ 請在伺服器頻道使用此指令")
         return
-    result = mission_votes.pop(ctx.guild.id)
+
+    guild_id = ctx.guild.id
+    if guild_id not in mission_votes or len(mission_votes[guild_id]) == 0:
+        await ctx.send("⚠️ 尚未開始任務或沒有玩家投票")
+        return
+
+    result = mission_votes.pop(guild_id)
     success = sum(1 for v in result.values() if v == "成功")
     fail = sum(1 for v in result.values() if v == "失敗")
+
     await ctx.send(f"📊 任務投票結果：成功 {success} 票，失敗 {fail} 票")
+
 
 if __name__ == "__main__":
     bot.run(TOKEN)
