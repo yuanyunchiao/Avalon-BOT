@@ -76,40 +76,51 @@ async def deal(ctx, *players: discord.Member):
 # ===== 特殊視野 =====
 @bot.command()
 async def vision(ctx):
-    """讓有特殊視野的人收到訊息"""
+    """發送特殊視野訊息給有能力的玩家"""
     if ctx.guild.id not in games:
         await ctx.send("⚠️ 尚未開始遊戲")
         return
+
     assignment = games[ctx.guild.id]
 
-    # 找角色
+    # 玩家分類
     merlin = [pid for pid, r in assignment.items() if r == "梅林"]
     percival = [pid for pid, r in assignment.items() if r == "派西維爾"]
-    evil_team = [pid for pid, r in assignment.items() if r in ["刺客", "莫甘娜", "爪牙", "莫德雷德"]]
+    evil_team = [pid for pid, r in assignment.items() if r in ["莫甘娜", "刺客", "莫德雷德", "爪牙"]]
     oberon = [pid for pid, r in assignment.items() if r == "奧伯倫"]
     modred = [pid for pid, r in assignment.items() if r == "莫德雷德"]
 
-    # 梅林看到壞人（包含奧伯倫，但不包含莫德雷德）
+    # --- 梅林視野 ---
     for pid in merlin:
         user = ctx.guild.get_member(pid)
-        names = [ctx.guild.get_member(e).display_name for e in evil_team if e not in modred] + \
-                [ctx.guild.get_member(o).display_name for o in oberon]
+        if user is None:
+            continue
+        # 梅林看到所有壞人，除了莫德雷德
+        names = [ctx.guild.get_member(e).display_name for e in evil_team if e not in modred and ctx.guild.get_member(e) is not None]
+        # 加上奧伯倫
+        names += [ctx.guild.get_member(o).display_name for o in oberon if ctx.guild.get_member(o) is not None]
         await user.send(f"👀 你知道壞人有：{', '.join(names)}")
 
-    # 派西維爾看到梅林/莫甘娜（身份不明）
+    # --- 壞人視野 ---
+    # 壞人看到其他壞人（身份不明），奧伯倫除外
+    visible_evil = [pid for pid in evil_team + modred if pid not in oberon]
+    for pid in visible_evil:
+        user = ctx.guild.get_member(pid)
+        if user is None:
+            continue
+        names = [ctx.guild.get_member(e).display_name for e in visible_evil if e != pid and ctx.guild.get_member(e) is not None]
+        await user.send(f"😈 你知道的同伴有：{', '.join(names) if names else '沒人'}")
+
+    # --- 派西維爾視野 ---
     for pid in percival:
         user = ctx.guild.get_member(pid)
-        names = [ctx.guild.get_member(uid).display_name for uid, r in assignment.items() if r in ["梅林","莫甘娜"]]
+        if user is None:
+            continue
+        names = [ctx.guild.get_member(uid).display_name for uid, r in assignment.items() if r in ["梅林", "莫甘娜"] and ctx.guild.get_member(uid) is not None]
         await user.send(f"🔮 你知道梅林/莫甘娜有：{', '.join(names)}")
 
-    # 壞人看到其他壞人（除了奧伯倫），身份不明
-    for pid in evil_team + modred:
-        user = ctx.guild.get_member(pid)
-        names = [ctx.guild.get_member(uid).display_name for uid in evil_team + modred if uid != pid]
-        await user.send(f"😈 你知道的壞人有：{', '.join(names) if names else '沒人'}")
-
-    # 奧伯倫不被壞人看到，但梅林可以看到（已處理於梅林視野）
     await ctx.send("✨ 特殊視野已經分發完畢！")
+
 
 # ===== 普通投票 =====
 @bot.command()
