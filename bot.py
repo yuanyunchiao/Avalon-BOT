@@ -114,3 +114,7 @@ async def voteresult(ctx):
     agree = sum(1 for v in result.values() if v == "同意")
     reject = sum(1 for v in result.values() if v == "否決")
     await ctx.send(f"📊 投票結果：同意 {agree} 票，否決 {reject} 票")
+
+if __name__ == "__main__":
+    bot.run(TOKEN)
+
