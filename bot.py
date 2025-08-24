@@ -188,5 +188,28 @@ async def missionresult(ctx):
     await ctx.send(f"📊 任務投票結果：成功 {success} 票，失敗 {fail} 票")
 
 
+import asyncio
+from aiohttp import web
+
+# --- 假裝有開 web server，讓 Render 不會砍掉 ---
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_app():
+    app = web.Application()
+    app.add_routes([web.get('/', handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 5000))  # Render 會給 PORT
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+# --- 同時跑 Discord Bot + Web server ---
+async def main():
+    await asyncio.gather(
+        bot.start(TOKEN),
+        start_web_app()
+    )
+
 if __name__ == "__main__":
-    bot.run(TOKEN)
+    asyncio.run(main())
