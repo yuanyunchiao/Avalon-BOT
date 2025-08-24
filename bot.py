@@ -84,38 +84,53 @@ async def vision(ctx):
         return
     assignment = games[ctx.guild.id]
 
-    evil_team = [pid for pid, r in assignment.items() if r in ["莫甘娜", "刺客", "爪牙"]]
-    modred = [pid for pid, r in assignment.items() if r == "莫德雷德"]
+    # 角色分類
+    evil_team = [pid for pid, r in assignment.items() if r in ["莫甘娜", "刺客", "爪牙"]]   # 一般壞人
+    mordred = [pid for pid, r in assignment.items() if r == "莫德雷德"]
     oberon = [pid for pid, r in assignment.items() if r == "奧伯倫"]
     merlin = [pid for pid, r in assignment.items() if r == "梅林"]
     percival = [pid for pid, r in assignment.items() if r == "派西維爾"]
 
-    # 梅林看到壞人（包含奧伯倫，但不含莫德雷德）
+    # 🎯 Merlin 視野：所有壞人 (包含奧伯倫)，但看不到莫德雷德
     for pid in merlin:
         user = ctx.guild.get_member(pid)
         if user:
-            names = [ctx.guild.get_member(e).display_name for e in evil_team if ctx.guild.get_member(e)]
-            names += [ctx.guild.get_member(o).display_name for o in oberon if ctx.guild.get_member(o)]
-            await user.send(f"👀 你知道壞人有：{', '.join(names)}")
+            names = []
+            for uid, role in assignment.items():
+                if role in ["莫甘娜", "刺客", "爪牙", "奧伯倫"]:  # Mordred 不算進去
+                    member = ctx.guild.get_member(uid)
+                    if member:
+                        names.append(member.display_name)
+            await user.send(f"👀 你知道壞人有：{', '.join(names) if names else '沒人'}")
 
-    # 壞人互相知道（奧伯倫除外，包括莫德雷德）
-    for pid in evil_team + modred:
+    # 😈 壞人互相認識 (奧伯倫例外)
+    for pid in evil_team + mordred:
         user = ctx.guild.get_member(pid)
         if user:
-            names = [ctx.guild.get_member(e).display_name for e in evil_team + modred if e != pid and ctx.guild.get_member(e)]
+            names = []
+            for uid in evil_team + mordred:
+                if uid != pid:
+                    member = ctx.guild.get_member(uid)
+                    if member:
+                        names.append(member.display_name)
             await user.send(f"😈 你知道的同伴有：{', '.join(names) if names else '沒人'}")
 
-    # 奧伯倫看不到任何壞人，也不被任何壞人看到
+    # 😈 奧伯倫：完全不知道其他壞人，也不被看到
     for pid in oberon:
         user = ctx.guild.get_member(pid)
         if user:
             await user.send("😈 你是隱蔽壞人，看不到任何隊友")
 
-    # 派西維爾看到梅林/莫甘娜
+    # 🔮 Percival：看到 梅林/莫甘娜
     for pid in percival:
         user = ctx.guild.get_member(pid)
         if user:
-            names = [ctx.guild.get_member(uid).display_name for uid, r in assignment.items() if r in ["梅林", "莫甘娜"] and ctx.guild.get_member(uid)]
+            names = []
+            for uid, role in assignment.items():
+                if role in ["梅林", "莫甘娜"]:
+                    member = ctx.guild.get_member(uid)
+                    if member:
+                        names.append(member.display_name)
             await user.send(f"🔮 你知道梅林/莫甘娜有：{', '.join(names)}")
 
     await ctx.send("✨ 特殊視野已經分發完畢！")
