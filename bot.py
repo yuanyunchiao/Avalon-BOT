@@ -78,47 +78,44 @@ async def deal(ctx, *players: discord.Member):
 # ===== 特殊視野 =====
 @bot.command()
 async def vision(ctx):
-    """發送特殊視野訊息"""
-    guild_id = ctx.guild.id
-    if guild_id not in games:
-        await ctx.send("⚠️ 尚未開始遊戲，請先發牌")
+    """讓有特殊視野的人收到訊息"""
+    if ctx.guild.id not in games:
+        await ctx.send("⚠️ 尚未開始遊戲")
         return
+    assignment = games[ctx.guild.id]
 
-    assignment = games[guild_id]
-
-    # 各角色分類
     evil_team = [pid for pid, r in assignment.items() if r in ["莫甘娜", "刺客", "爪牙"]]
     modred = [pid for pid, r in assignment.items() if r == "莫德雷德"]
     oberon = [pid for pid, r in assignment.items() if r == "奧伯倫"]
     merlin = [pid for pid, r in assignment.items() if r == "梅林"]
     percival = [pid for pid, r in assignment.items() if r == "派西維爾"]
 
-    # --- 梅林視角 ---
+    # 梅林看到壞人（不含莫德雷德，但包含奧伯倫）
     for pid in merlin:
-        user = ctx.guild.get_member(pid)
+        user = bot.get_user(pid)
         if user:
-            names = [ctx.guild.get_member(e).display_name for e in evil_team if ctx.guild.get_member(e)]
-            names += [ctx.guild.get_member(o).display_name for o in oberon if ctx.guild.get_member(o)]
+            names = [bot.get_user(e).display_name for e in evil_team if e not in modred]
+            names += [bot.get_user(o).display_name for o in oberon]
             await user.send(f"👀 你知道壞人有：{', '.join(names)}")
 
-    # --- 壞人視角（奧伯倫除外） ---
+    # 壞人互相知道（奧伯倫除外，包括莫德雷德）
     for pid in evil_team + modred:
-        user = ctx.guild.get_member(pid)
+        user = bot.get_user(pid)
         if user:
-            names = [ctx.guild.get_member(e).display_name for e in evil_team + modred if e != pid and ctx.guild.get_member(e)]
+            names = [bot.get_user(e).display_name for e in evil_team + modred if e != pid]
             await user.send(f"😈 你知道的同伴有：{', '.join(names) if names else '沒人'}")
 
-    # --- 奧伯倫視角 ---
+    # 奧伯倫看不到任何隊友，也不被任何壞人看到
     for pid in oberon:
-        user = ctx.guild.get_member(pid)
+        user = bot.get_user(pid)
         if user:
-            await user.send("😈 你是隱蔽壞人，看不到任何隊友，也不被任何壞人看到")
+            await user.send("😈 你是隱蔽壞人，看不到任何隊友")
 
-    # --- 派西維爾視角 ---
+    # 派西維爾看到梅林/莫甘娜
     for pid in percival:
-        user = ctx.guild.get_member(pid)
+        user = bot.get_user(pid)
         if user:
-            names = [ctx.guild.get_member(uid).display_name for uid, r in assignment.items() if r in ["梅林", "莫甘娜"] and ctx.guild.get_member(uid)]
+            names = [bot.get_user(uid).display_name for uid, r in assignment.items() if r in ["梅林", "莫甘娜"]]
             await user.send(f"🔮 你知道梅林/莫甘娜有：{', '.join(names)}")
 
     await ctx.send("✨ 特殊視野已經分發完畢！")
