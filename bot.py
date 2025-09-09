@@ -21,6 +21,7 @@ DEFAULT_ROLES = {
 
 # ----------- 遊戲狀態 -----------
 games = {}  # { guild_id: {player_id: role} }
+games_members = {}  # { guild_id: {player_id: Member} }
 mission_votes = {}  # { guild_id: {player_id: '成功'/'失敗'} }
 custom_role_pool = {}  # { guild_id: [roles...] }
 server_locks = {}  # { guild_id: {"deal": False, "vision": False} }
@@ -83,29 +84,33 @@ async def deal(ctx, *players: discord.Member):
 
     random.shuffle(roles_pool)
     assignment = {}
+    members_map = {}
     for p in player_list:
         role = roles_pool.pop()
         assignment[p.id] = role
+        members_map[p.id] = p
         try:
             await p.send(f"🎭 你的身份是：**{role}**")
         except:
             await ctx.send(f"無法私訊 {p.mention}")
 
     games[guild_id] = assignment
+    games_members[guild_id] = members_map
     await ctx.send("✅ 已經發牌完成！")
     lock["deal"] = False
 
-# ===== 特殊視野 =====
+# ----------- 特殊視野 -----------
 @bot.command()
 async def vision(ctx):
     """讓有特殊視野的人收到訊息"""
-    if ctx.guild.id not in games:
-        await ctx.send("⚠️ 尚未開始遊戲")
+    guild_id = ctx.guild.id
+    if guild_id not in games or guild_id not in games_members:
+        await ctx.send("⚠️ 尚未開始遊戲或缺少會員資料")
         return
 
-    assignment = games[ctx.guild.id]
+    assignment = games[guild_id]
+    members = games_members[guild_id]
 
-    # 分組
     evil_team = [pid for pid, r in assignment.items() if r in ["莫甘娜", "刺客", "爪牙"]]
     modred = [pid for pid, r in assignment.items() if r == "莫德雷德"]
     oberon = [pid for pid, r in assignment.items() if r == "奧伯倫"]
@@ -114,61 +119,31 @@ async def vision(ctx):
 
     # 梅林看到壞人（不含莫德雷德，但包含奧伯倫）
     for pid in merlin:
-        user = ctx.guild.get_member(pid)
+        user = members.get(pid)
         if user:
-            names = []
-            for e in evil_team:
-                if e not in modred:
-                    member = ctx.guild.get_member(e)
-                    if member:
-                        names.append(member.display_name)
-            for o in oberon:
-                member = ctx.guild.get_member(o)
-                if member:
-                    names.append(member.display_name)
-            try:
-                await user.send(f"👀 你知道壞人有：{', '.join(names)}")
-            except Exception as e:
-                print(f"無法 DM {user.display_name}: {e}")
+            names = [members[e].display_name for e in evil_team if e not in modred] + \
+                    [members[o].display_name for o in oberon]
+            await user.send(f"👀 你知道壞人有：{', '.join(names)}")
 
     # 壞人互相知道（奧伯倫除外，包括莫德雷德）
     for pid in evil_team + modred:
-        user = ctx.guild.get_member(pid)
+        user = members.get(pid)
         if user:
-            names = []
-            for e in evil_team + modred:
-                if e != pid:
-                    member = ctx.guild.get_member(e)
-                    if member:
-                        names.append(member.display_name)
-            try:
-                await user.send(f"😈 你知道的同伴有：{', '.join(names) if names else '沒人'}")
-            except Exception as e:
-                print(f"無法 DM {user.display_name}: {e}")
+            names = [members[e].display_name for e in evil_team + modred if e != pid]
+            await user.send(f"😈 你知道的同伴有：{', '.join(names) if names else '沒人'}")
 
     # 奧伯倫看不到任何隊友，也不被任何壞人看到
     for pid in oberon:
-        user = ctx.guild.get_member(pid)
+        user = members.get(pid)
         if user:
-            try:
-                await user.send("😈 你是隱蔽壞人，看不到任何隊友")
-            except Exception as e:
-                print(f"無法 DM {user.display_name}: {e}")
+            await user.send("😈 你是隱蔽壞人，看不到任何隊友")
 
     # 派西維爾看到梅林/莫甘娜
     for pid in percival:
-        user = ctx.guild.get_member(pid)
+        user = members.get(pid)
         if user:
-            names = []
-            for uid, r in assignment.items():
-                if r in ["梅林", "莫甘娜"]:
-                    member = ctx.guild.get_member(uid)
-                    if member:
-                        names.append(member.display_name)
-            try:
-                await user.send(f"🔮 你知道梅林/莫甘娜有：{', '.join(names)}")
-            except Exception as e:
-                print(f"無法 DM {user.display_name}: {e}")
+            names = [members[uid].display_name for uid, r in assignment.items() if r in ["梅林", "莫甘娜"]]
+            await user.send(f"🔮 你知道梅林/莫甘娜有：{', '.join(names)}")
 
     await ctx.send("✨ 特殊視野已經分發完畢！")
 
