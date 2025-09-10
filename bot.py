@@ -11,7 +11,8 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
+tree = bot.tree  # 用於斜線指令
+print("DEBUG TOKEN:", TOKEN)
 
 # ----------- Avalon Roles -----------
 DEFAULT_ROLES = {
@@ -30,30 +31,28 @@ server_locks = {}  # { guild_id: {"deal": False, "vision": False} }
 # ----------- Bot Events -----------
 @bot.event
 async def on_ready():
-    print(f"✅ 已登入 {bot.user}")
-    try:
-        synced = await tree.sync()
-        print(f"✅ 已同步 {len(synced)} 個斜線指令")
-    except Exception as e:
-        print(f"❌ 指令同步失敗: {e}")
+    await tree.sync()  # 同步斜線指令
+    print(f"✅ 已登入 {bot.user}，斜線指令已同步")
 
 # ----------- 自訂角色池 -----------
 @tree.command(name="setroles", description="設定本局自訂角色池")
-@app_commands.describe(roles="輸入要使用的角色名稱，用空格隔開")
+@app_commands.describe(roles="輸入要使用的角色名稱，以空格分隔")
 async def setroles(interaction: discord.Interaction, roles: str):
-    guild_id = interaction.guild.id
-    role_list = roles.split()
+    roles_list = roles.split()
+    if not roles_list:
+        await interaction.response.send_message("⚠️ 請輸入至少一個角色名稱", ephemeral=True)
+        return
     valid_roles = DEFAULT_ROLES["good"] + DEFAULT_ROLES["evil"] + DEFAULT_ROLES["others"]
-    for r in role_list:
+    for r in roles_list:
         if r not in valid_roles:
             await interaction.response.send_message(f"⚠️ 角色 {r} 不合法", ephemeral=True)
             return
-    custom_role_pool[guild_id] = role_list
-    await interaction.response.send_message(f"✅ 本局自訂角色池已設定：{', '.join(role_list)}")
+    custom_role_pool[interaction.guild.id] = list(roles_list)
+    await interaction.response.send_message(f"✅ 本局自訂角色池已設定：{', '.join(roles_list)}")
 
-# ----------- 發牌（斜線 + 可多 @玩家） -----------
-@tree.command(name="deal", description="發牌給玩家")
-@app_commands.describe(players="提及要發牌的玩家，例如 @玩家1 @玩家2")
+# ----------- 發牌 -----------
+@tree.command(name="deal", description="發牌，私訊給玩家")
+@app_commands.describe(players="標註玩家，例如 @玩家1 @玩家2")
 async def deal(interaction: discord.Interaction, players: str):
     guild_id = interaction.guild.id
     lock = server_locks.setdefault(guild_id, {"deal": False, "vision": False})
@@ -62,13 +61,10 @@ async def deal(interaction: discord.Interaction, players: str):
         return
     lock["deal"] = True
 
-    player_list = []
-    for mention in players.split():
-        if mention.startswith("<@") and mention.endswith(">"):
-            uid = int(mention.replace("<@", "").replace("!", "").replace(">", ""))
-            member = interaction.guild.get_member(uid)
-            if member:
-                player_list.append(member)
+    # 解析 @玩家，Discord會把輸入轉成 Member 物件，如果是純文字，嘗試從 mentions 裡找
+    player_list = interaction.user.mentionable_mentions if hasattr(interaction, 'mentionable_mentions') else []
+    if not player_list:  # fallback
+        player_list = [m for m in interaction.guild.members if str(m) in players]
 
     if len(player_list) < 5:
         await interaction.response.send_message("玩家不足（至少 5 人）", ephemeral=True)
@@ -81,6 +77,8 @@ async def deal(interaction: discord.Interaction, players: str):
         return
 
     roles_pool = custom_role_pool[guild_id].copy()
+
+    # 補齊人數
     needed = len(player_list) - len(roles_pool)
     good_count = sum(1 for r in roles_pool if r in DEFAULT_ROLES["good"])
     evil_count = sum(1 for r in roles_pool if r in DEFAULT_ROLES["evil"])
@@ -110,7 +108,7 @@ async def deal(interaction: discord.Interaction, players: str):
     lock["deal"] = False
 
 # ----------- 特殊視野 -----------
-@tree.command(name="vision", description="分發特殊視野給玩家")
+@tree.command(name="vision", description="發送特殊視野訊息給玩家")
 async def vision(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     if guild_id not in games or guild_id not in games_members:
@@ -152,21 +150,16 @@ async def vision(interaction: discord.Interaction):
 
     await interaction.response.send_message("✨ 特殊視野已經分發完畢！")
 
-# ----------- 任務投票 -----------
-
+# ----------- 任務投票（DM） -----------
 @tree.command(name="missionstart", description="開始任務投票")
-@app_commands.describe(players="提及參與任務的玩家，例如 @玩家1 @玩家2")
+@app_commands.describe(players="標註玩家，例如 @玩家1 @玩家2")
 async def missionstart(interaction: discord.Interaction, players: str):
     guild_id = interaction.guild.id
     mission_votes[guild_id] = {}
 
-    player_list = []
-    for mention in players.split():
-        if mention.startswith("<@") and mention.endswith(">"):
-            uid = int(mention.replace("<@", "").replace("!", "").replace(">", ""))
-            member = interaction.guild.get_member(uid)
-            if member:
-                player_list.append(member)
+    player_list = interaction.user.mentionable_mentions if hasattr(interaction, 'mentionable_mentions') else []
+    if not player_list:
+        player_list = [m for m in interaction.guild.members if str(m) in players]
 
     for p in player_list:
         try:
@@ -175,8 +168,8 @@ async def missionstart(interaction: discord.Interaction, players: str):
             await interaction.followup.send(f"無法私訊 {p.mention}", ephemeral=True)
     await interaction.response.send_message("✅ 任務投票已經私訊給玩家！")
 
-@tree.command(name="vote", description="DM 投票")
-@app_commands.describe(choice="輸入 成功 或 失敗")
+@tree.command(name="vote", description="投票 (DM使用)")
+@app_commands.describe(choice="選擇成功或失敗")
 async def vote(interaction: discord.Interaction, choice: str):
     if interaction.guild is not None:
         await interaction.response.send_message("⚠️ 請私訊我投票，不要在伺服器頻道使用此指令", ephemeral=True)
@@ -184,16 +177,22 @@ async def vote(interaction: discord.Interaction, choice: str):
     if choice not in ["成功", "失敗"]:
         await interaction.response.send_message("只能輸入 `成功` 或 `失敗`", ephemeral=True)
         return
-
     for guild_id, votes in mission_votes.items():
-        votes[interaction.user.id] = choice
-        await interaction.response.send_message(f"✅ 你的投票已紀錄：{choice}", ephemeral=True)
-        return
-
+        if interaction.user.id in votes:
+            votes[interaction.user.id] = choice
+            await interaction.response.send_message(f"✅ 你的投票已紀錄：{choice}")
+            return
+        elif interaction.user.id not in votes:
+            votes[interaction.user.id] = choice
+            await interaction.response.send_message(f"✅ 你的投票已紀錄：{choice}")
+            return
     await interaction.response.send_message("⚠️ 目前沒有任務要求你投票，請等待主持人開始任務", ephemeral=True)
 
-@tree.command(name="missionresult", description="統計任務投票結果")
+@tree.command(name="missionresult", description="查看任務投票結果")
 async def missionresult(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("⚠️ 請在伺服器頻道使用此指令", ephemeral=True)
+        return
     guild_id = interaction.guild.id
     if guild_id not in mission_votes or len(mission_votes[guild_id]) == 0:
         await interaction.response.send_message("⚠️ 尚未開始任務或沒有玩家投票", ephemeral=True)
